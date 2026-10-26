@@ -1,8 +1,8 @@
 # Slade Gardens Adventure Playground – Staff Timesheets
 
-A free, mobile-friendly timesheet app. The website is hosted on **GitHub Pages** (the `docs` folder) and the logins and data are held in **Supabase**. Login codes are sent by email through **Brevo**.
+A free, mobile-friendly timesheet app. The website is hosted on **GitHub Pages** (the root of this repository) and the logins and data are held in **Supabase**. Login codes are sent by email through **Brevo**.
 
-**Live site:** https://adam-gibson.github.io/sladegardens/
+**Live site:** https://adam-gibson.github.io/SladeGardens/
 
 ## What it does
 - **Login without passwords:** staff enter their email and receive a login code. They stay logged in on their phone.
@@ -29,18 +29,18 @@ A **new project** is recommended so that this app's users, email wording and set
    <p style="font-size:28px;font-weight:bold;letter-spacing:4px">{{ .Token }}</p>
    <p>It expires in 10 minutes. If you didn't ask for this, ignore this email.</p>
    ```
-5. **Authentication → URL Configuration:** set the *Site URL* to `https://adam-gibson.github.io/sladegardens/`.
-6. **Project Settings → API Keys:** copy the *Project URL* and the *publishable* key (or the legacy *anon public* key) into `docs/config.js`. Commit the change.
+5. **Authentication → URL Configuration:** set the *Site URL* to `https://adam-gibson.github.io/SladeGardens/`.
+6. **Project Settings → API Keys:** copy the *Project URL* and the *publishable* key (or the legacy *anon public* key) into `config.js`. Commit the change.
 
 ### 2. GitHub Pages
-**Settings → Pages → Build and deployment:** set the source to *Deploy from a branch*, choose branch `main` and folder `/docs`, and save. The site appears at the address above within a minute or two.
+**Settings → Pages → Build and deployment:** set the source to *Deploy from a branch*, choose branch `main` and folder `/ (root)`, and save. The site appears at the address above within a minute or two.
 
 ### 3. First login
 Open the site and log in with the administrator email you set in step 1. You will go straight to the admin view.
 
 ## Changing things
-- **Activities list:** edit `activities` in `docs/config.js`.
-- **14-day edit window:** change `editWindowDays` in `docs/config.js` **and** the three `current_date - 14` lines in `supabase/schema.sql`, then run the schema again. It is safe to run more than once.
+- **Activities list:** edit `activities` in `config.js`.
+- **14-day edit window:** change `editWindowDays` in `config.js` **and** the three `current_date - 14` lines in `supabase/schema.sql`, then run the schema again. It is safe to run more than once.
 - **Removing a member of staff:** in the Staff tab, set their status to *Inactive*. Their hours are kept.
 - **Making someone an administrator:** in the Staff tab, edit them and set their role to *Admin*.
 
