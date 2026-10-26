@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Staff Timesheets – Slade Gardens Adventure Playground</title>
+  <meta name="theme-color" content="#77b843">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon-192.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Montserrat:wght@400;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header class="top">
+    <a class="logo" href="./" aria-label="Slade Gardens Adventure Playground – home">
+      <span class="logo-main">SLADE <span class="star">✱</span> GARDENS</span>
+      <span class="logo-sub">ADVENTURE PLAYGROUND</span>
+    </a>
+    <div class="tagline">Staff timesheets</div>
+    <button id="logout" class="link-btn" hidden>Log out</button>
+  </header>
+  <div class="band"><h1 id="title">Space to play and much more!</h1><p id="subtitle"></p></div>
+  <main id="app" aria-live="polite"><p class="muted" style="text-align:center">Loading…</p></main>
+  <div id="toast" role="status"></div>
+  <footer>Slade Gardens Adventure Playground · Lorn Road, London SW9 · <a href="https://www.sladeadventure.co.uk" target="_blank" rel="noopener">sladeadventure.co.uk</a></footer>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
