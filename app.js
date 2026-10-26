@@ -75,7 +75,7 @@ function viewLogin(msg = '') {
     const btn = $('button', e.target); btn.disabled = true;
     state.email = $('#email').value.trim().toLowerCase();
     try {
-      check(await sb.auth.signInWithOtp({ email: state.email, options: { shouldCreateUser: true } }));
+      check(await sb.auth.signInWithOtp({ email: state.email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } }));
       viewVerify();
     } catch (err) { $('#err').textContent = err.message; btn.disabled = false; }
   };
@@ -84,7 +84,7 @@ function viewLogin(msg = '') {
 function viewVerify() {
   app.innerHTML = `<div class="card narrow">
     <h2>Enter your code</h2>
-    <p class="muted">We've emailed a login code to <strong>${esc(state.email)}</strong>. Check your junk folder if it hasn't arrived within a minute.</p>
+    <p class="muted">We've emailed a login code to <strong>${esc(state.email)}</strong>. Enter the code below, or tap the sign-in link in the email. Check your junk folder if it hasn't arrived within a minute.</p>
     <form id="f">
       <label for="code">Login code</label>
       <input id="code" inputmode="numeric" autocomplete="one-time-code" pattern="\\d{6,10}" maxlength="10" required style="font-size:1.6rem;letter-spacing:.3em;text-align:center">
