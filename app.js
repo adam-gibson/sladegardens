@@ -17,13 +17,16 @@ const hrs = (n) => (Math.round(n * 100) / 100).toFixed(2);
 const t5 = (t) => (t || '').slice(0, 5);
 const formData = (f) => Object.fromEntries(new FormData(f).entries());
 const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
-const editable = (e) => state.profile.role === 'admin' || e.work_date >= daysAgo(CFG.editWindowDays);
+const editable = (e) => state.profile.role === 'admin' || (!e.approved_at && e.work_date >= daysAgo(CFG.editWindowDays));
+const fmtStamp = (t) => new Date(t).toLocaleString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const statusTag = (e) => e.approved_at ? '<span class="tag ok">✔ Approved</span>' : '<span class="tag pending">Awaiting approval</span>';
+const ENTRY_COLS = '*, profiles:profiles!entries_user_id_fkey(forename, surname, email, phone), approver:profiles!entries_approved_by_fkey(forename, surname)';
 
 // Turns Supabase errors into friendly messages
 function check({ data, error }) {
   if (!error) return data;
   const m = error.message || '';
-  if (/row-level security|permission denied/i.test(m)) throw new Error(`Not allowed. Hours older than ${CFG.editWindowDays} days are locked – please contact the administrator.`);
+  if (/row-level security|permission denied/i.test(m)) throw new Error(`Not allowed. Approved hours, and hours older than ${CFG.editWindowDays} days, are locked – please contact the administrator.`);
   if (/rate limit|security purposes/i.test(m)) throw new Error('Too many codes requested. Please wait a few minutes and try again.');
   if (/expired|invalid/i.test(m) && /token|otp/i.test(m)) throw new Error('That code is not correct or has expired.');
   if (/duplicate key/i.test(m)) throw new Error('That email address is already in use.');
@@ -193,12 +196,14 @@ function viewStaff(container = app) {
   async function load() {
     const entries = await fetchAll(() => dateFilter(sb.from('entries').select('*').eq('user_id', state.profile.id), from.value, to.value)
       .order('work_date', { ascending: false }).order('start_time', { ascending: false }));
-    $('#sum', container).textContent = hrs(entries.reduce((s, e) => s + Number(e.hours), 0)) + ' hrs';
-    $('#count', container).textContent = `${entries.length} shift${entries.length === 1 ? '' : 's'}`;
+    const approved = entries.filter((e) => e.approved_at).reduce((s, e) => s + Number(e.hours), 0);
+    const total = entries.reduce((s, e) => s + Number(e.hours), 0);
+    $('#sum', container).textContent = hrs(total) + ' hrs';
+    $('#count', container).innerHTML = `${entries.length} shift${entries.length === 1 ? '' : 's'}<br><small>${hrs(approved)} approved · ${hrs(total - approved)} awaiting</small>`;
     $('#list', container).innerHTML = entries.length ? entries.map((e) => `<li>
         <span class="when">${fmtDate(e.work_date)}</span><span class="hrs">${hrs(e.hours)}</span>
-        <span class="meta"><span class="tag">${esc(e.activity)}</span> ${t5(e.start_time)}–${t5(e.end_time)}${e.break_mins ? ` · ${e.break_mins} min break` : ''}${e.notes ? `<br>${esc(e.notes)}` : ''}</span>
-        <span class="acts">${editable(e) ? `<button class="btn small ghost" data-edit="${e.id}">Edit</button>` : '<span class="muted">Locked</span>'}</span>
+        <span class="meta">${statusTag(e)} <span class="tag">${esc(e.activity)}</span> ${t5(e.start_time)}–${t5(e.end_time)}${e.break_mins ? ` · ${e.break_mins} min break` : ''}${e.notes ? `<br>${esc(e.notes)}` : ''}</span>
+        <span class="acts">${editable(e) ? `<button class="btn small ghost" data-edit="${e.id}">Edit</button>` : `<span class="muted">${e.approved_at ? 'Approved' : 'Locked'}</span>`}</span>
       </li>`).join('') : '<li class="muted">No hours logged for this period.</li>';
     container.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => editEntry(entries.find((x) => x.id == b.dataset.edit), load));
   }
@@ -209,7 +214,9 @@ function viewStaff(container = app) {
 
 function editEntry(e, done) {
   const d = document.createElement('dialog');
-  d.innerHTML = `<h2>Edit hours</h2><form id="ef">${entryForm(e)}
+  const approvedNote = e.approved_at ? `<p class="calc" style="margin-top:0">✔ Approved${e.approver ? ` by ${esc(e.approver.forename)} ${esc(e.approver.surname)}` : ''} on ${fmtStamp(e.approved_at)}.
+    Saving changes will send it back for approval. <a href="#" id="unapp">Remove approval</a></p>` : '';
+  d.innerHTML = `<h2>Edit hours</h2>${approvedNote}<form id="ef">${entryForm(e)}
     <div class="btns" style="margin-top:16px"><button class="btn">Save</button><button type="button" class="btn ghost" id="cx">Cancel</button></div>
     <p class="error" id="eerr"></p><p class="or"><a href="#" id="del" style="color:var(--red)">Delete this entry</a></p></form>`;
   document.body.append(d); d.showModal();
@@ -221,6 +228,11 @@ function editEntry(e, done) {
     try { check(await sb.from('entries').update(entryData(f)).eq('id', e.id).select()); d.remove(); toast('Entry updated'); done(); }
     catch (err) { $('#eerr', d).textContent = err.message; }
   };
+  $('#unapp', d)?.addEventListener('click', async (ev) => {
+    ev.preventDefault();
+    try { check(await sb.from('entries').update({ approved_at: null }).eq('id', e.id)); d.remove(); toast('Approval removed'); done(); }
+    catch (err) { $('#eerr', d).textContent = err.message; }
+  });
   $('#del', d).onclick = async (ev) => {
     ev.preventDefault();
     if (!confirm('Delete this entry?')) return;
@@ -232,11 +244,13 @@ function editEntry(e, done) {
 // ---------- admin ----------
 function viewAdmin(tab = 'timesheets') {
   app.innerHTML = `<div class="tabs">
-    <button data-tab="timesheets">Timesheets</button><button data-tab="staff">Staff <span id="pend"></span></button><button data-tab="mine">My hours</button>
+    <button data-tab="timesheets">Timesheets <span id="toapp"></span></button><button data-tab="staff">Staff <span id="pend"></span></button><button data-tab="mine">My hours</button>
   </div><div id="pane"></div>`;
   app.querySelectorAll('[data-tab]').forEach((b) => { b.classList.toggle('on', b.dataset.tab === tab); b.onclick = () => viewAdmin(b.dataset.tab); });
   sb.from('profiles').select('id', { count: 'exact', head: true }).eq('status', 'pending')
     .then(({ count }) => { if (count) $('#pend').textContent = `(${count} new)`; });
+  sb.from('entries').select('id', { count: 'exact', head: true }).is('approved_at', null)
+    .then(({ count }) => { if (count) $('#toapp').textContent = `(${count} to approve)`; });
   const pane = $('#pane');
   const run = tab === 'mine' ? viewStaff : tab === 'staff' ? adminStaff : adminTimesheets;
   Promise.resolve(run(pane)).catch((e) => toast(e.message));
@@ -248,19 +262,24 @@ async function adminTimesheets(pane) {
     <div class="filters">
       <div><label>From</label><input type="date" id="from"></div>
       <div><label>To</label><input type="date" id="to"></div>
+      <div><label>Status</label><select id="st"><option value="">All</option><option value="wait">Awaiting approval</option><option value="ok">Approved</option></select></div>
       <div><label>Staff member</label><select id="who"><option value="">Everyone</option>${users.map((u) => `<option value="${u.id}">${esc(u.surname)}, ${esc(u.forename)}</option>`).join('')}</select></div>
       <div><button class="btn block" id="csv" style="margin:0">Export CSV</button></div>
     </div>${chipsHtml()}
     <div class="total"><span id="count"></span><strong id="sum"></strong></div>
-    <h3>Summary by staff member</h3><div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Shifts</th><th class="num">Hours</th></tr></thead><tbody id="summary"></tbody></table></div>
-    <h3 style="margin-top:20px">All entries</h3><div class="table-wrap"><table><thead><tr><th>Date</th><th>Name</th><th>Activity</th><th>Times</th><th class="num">Break</th><th class="num">Hours</th><th class="hide-sm">Notes</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
+    <h3>Summary by staff member</h3><div class="table-wrap"><table><thead><tr><th>Name</th><th class="num">Shifts</th><th class="num">Approved</th><th class="num">Awaiting</th><th class="num">Total hours</th></tr></thead><tbody id="summary"></tbody></table></div>
+    <h3 style="margin-top:20px">All entries</h3>
+    <div class="bulk"><label class="check"><input type="checkbox" id="all"> Select all awaiting</label>
+      <button class="btn small green" id="bulk" disabled>Approve selected</button></div>
+    <div class="table-wrap"><table><thead><tr><th></th><th>Date</th><th>Name</th><th>Activity</th><th>Times</th><th class="num">Break</th><th class="num">Hours</th><th>Status</th><th class="hide-sm">Notes</th><th></th></tr></thead><tbody id="rows"></tbody></table></div>
   </div>`;
-  const from = $('#from'), to = $('#to'), who = $('#who');
+  const from = $('#from'), to = $('#to'), who = $('#who'), st = $('#st');
   [from.value, to.value] = ranges()['This month'];
   let entries = [];
   const query = () => fetchAll(() => {
-    let q = dateFilter(sb.from('entries').select('*, profiles(forename, surname, email, phone)'), from.value, to.value);
+    let q = dateFilter(sb.from('entries').select(ENTRY_COLS), from.value, to.value);
     if (who.value) q = q.eq('user_id', who.value);
+    if (st.value) q = st.value === 'ok' ? q.not('approved_at', 'is', null) : q.is('approved_at', null);
     return q.order('work_date', { ascending: false }).order('start_time');
   });
   async function load() {
@@ -269,15 +288,34 @@ async function adminTimesheets(pane) {
     $('#sum').textContent = hrs(entries.reduce((s, e) => s + Number(e.hours), 0)) + ' hrs';
     $('#count').textContent = `${entries.length} ${entries.length === 1 ? 'entry' : 'entries'}`;
     const by = {};
-    entries.forEach((e) => { const k = name(e); by[k] = by[k] || { n: 0, h: 0 }; by[k].n++; by[k].h += Number(e.hours); });
-    $('#summary').innerHTML = Object.keys(by).sort().map((k) => `<tr><td>${esc(k)}</td><td class="num">${by[k].n}</td><td class="num"><strong>${hrs(by[k].h)}</strong></td></tr>`).join('') || '<tr><td colspan="3" class="muted">No entries.</td></tr>';
-    $('#rows').innerHTML = entries.map((e) => `<tr><td style="white-space:nowrap">${fmtDate(e.work_date)}</td><td>${esc(e.profiles?.forename)} ${esc(e.profiles?.surname)}</td><td>${esc(e.activity)}</td>
-      <td style="white-space:nowrap">${t5(e.start_time)}–${t5(e.end_time)}</td><td class="num">${e.break_mins}</td><td class="num"><strong>${hrs(e.hours)}</strong></td><td class="hide-sm">${esc(e.notes)}</td>
-      <td><button class="btn small ghost" data-edit="${e.id}">Edit</button></td></tr>`).join('') || '<tr><td colspan="8" class="muted">No entries for this period.</td></tr>';
+    entries.forEach((e) => { const k = name(e); by[k] = by[k] || { n: 0, h: 0, a: 0 }; by[k].n++; by[k].h += Number(e.hours); if (e.approved_at) by[k].a += Number(e.hours); });
+    $('#summary').innerHTML = Object.keys(by).sort().map((k) => `<tr><td>${esc(k)}</td><td class="num">${by[k].n}</td><td class="num">${hrs(by[k].a)}</td><td class="num">${hrs(by[k].h - by[k].a)}</td><td class="num"><strong>${hrs(by[k].h)}</strong></td></tr>`).join('') || '<tr><td colspan="5" class="muted">No entries.</td></tr>';
+    $('#rows').innerHTML = entries.map((e) => `<tr><td>${e.approved_at ? '' : `<input type="checkbox" class="pick" value="${e.id}" aria-label="Select entry">`}</td><td style="white-space:nowrap">${fmtDate(e.work_date)}</td><td>${esc(e.profiles?.forename)} ${esc(e.profiles?.surname)}</td><td>${esc(e.activity)}</td>
+      <td style="white-space:nowrap">${t5(e.start_time)}–${t5(e.end_time)}</td><td class="num">${e.break_mins}</td><td class="num"><strong>${hrs(e.hours)}</strong></td>
+      <td>${e.approved_at ? `<span class="tag ok" title="${fmtStamp(e.approved_at)}">✔ ${esc(e.approver?.forename || 'Approved')}</span>` : `<button class="btn small green" data-approve="${e.id}">Approve</button>`}</td>
+      <td class="hide-sm">${esc(e.notes)}</td>
+      <td><button class="btn small ghost" data-edit="${e.id}">Edit</button></td></tr>`).join('') || '<tr><td colspan="10" class="muted">No entries for this period.</td></tr>';
+    $('#all').checked = false; picked();
     pane.querySelectorAll('[data-edit]').forEach((b) => b.onclick = () => editEntry(entries.find((x) => x.id == b.dataset.edit), load));
+    pane.querySelectorAll('[data-approve]').forEach((b) => b.onclick = () => approve([Number(b.dataset.approve)]));
+    pane.querySelectorAll('.pick').forEach((c) => c.onchange = picked);
+  }
+  const picks = () => [...pane.querySelectorAll('.pick:checked')].map((c) => Number(c.value));
+  function picked() { const n = picks().length; $('#bulk').disabled = !n; $('#bulk').textContent = n ? `Approve selected (${n})` : 'Approve selected'; }
+  $('#all').onchange = (e) => { pane.querySelectorAll('.pick').forEach((c) => c.checked = e.target.checked); picked(); };
+  $('#bulk').onclick = () => approve(picks());
+  async function approve(ids) {
+    if (!ids.length) return;
+    try {
+      const done = check(await sb.from('entries').update({ approved_at: new Date().toISOString() }).in('id', ids).is('approved_at', null).select('id'));
+      toast(`${done.length} ${done.length === 1 ? 'entry' : 'entries'} approved ✔`);
+      await load();
+      const { count } = await sb.from('entries').select('id', { count: 'exact', head: true }).is('approved_at', null);
+      $('#toapp').textContent = count ? `(${count} to approve)` : '';
+    } catch (e) { toast(e.message); }
   }
   const reload = () => load().catch((e) => toast(e.message));
-  from.onchange = to.onchange = who.onchange = reload;
+  from.onchange = to.onchange = who.onchange = st.onchange = reload;
   bindChips(pane, from, to, reload);
   $('#csv').onclick = () => downloadCsv([...entries].reverse(), from.value, to.value);
   await load();
@@ -285,9 +323,10 @@ async function adminTimesheets(pane) {
 
 function downloadCsv(rows, from, to) {
   const cell = (v) => { const s = String(v ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-  const head = ['Date', 'Forename', 'Surname', 'Email', 'Phone', 'Activity', 'Start', 'Finish', 'Break (mins)', 'Hours', 'Notes', 'Last updated'];
+  const head = ['Date', 'Forename', 'Surname', 'Email', 'Phone', 'Activity', 'Start', 'Finish', 'Break (mins)', 'Hours', 'Notes', 'Last updated', 'Status', 'Approved by', 'Approved at'];
   const lines = rows.map((r) => [r.work_date, r.profiles?.forename, r.profiles?.surname, r.profiles?.email, r.profiles?.phone, r.activity,
-    t5(r.start_time), t5(r.end_time), r.break_mins, r.hours, r.notes, new Date(r.updated_at).toLocaleString('en-GB')].map(cell).join(','));
+    t5(r.start_time), t5(r.end_time), r.break_mins, r.hours, r.notes, new Date(r.updated_at).toLocaleString('en-GB'),
+    r.approved_at ? 'Approved' : 'Awaiting approval', r.approver ? `${r.approver.forename} ${r.approver.surname}` : '', r.approved_at ? new Date(r.approved_at).toLocaleString('en-GB') : ''].map(cell).join(','));
   const blob = new Blob(['﻿' + [head.join(','), ...lines].join('\r\n')], { type: 'text/csv;charset=utf-8' });
   const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: `timesheets_${from || 'all'}_to_${to || 'all'}.csv` });
   document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(a.href);

@@ -1,6 +1,6 @@
 -- Slade Gardens Adventure Playground – Staff Timesheets
 -- Run this once in Supabase: Dashboard → SQL Editor → New query → paste → Run.
--- FIRST: change the admin email at the bottom of this file.
+-- FIRST: change the admin email at the bottom of this file. Then run 002_entry_approval.sql.
 
 -- ---------- tables ----------
 create table if not exists public.profiles (
@@ -75,7 +75,8 @@ create trigger on_auth_user_created after insert on auth.users
 create or replace function public.protect_profile() returns trigger
 language plpgsql set search_path = public as $$
 begin
-  if not is_admin() then
+  -- auth.uid() is null when changed directly in the Supabase SQL Editor, which is trusted
+  if auth.uid() is not null and not is_admin() then
     new.role := old.role; new.status := old.status; new.email := old.email;
   end if;
   if new.id = auth.uid() and old.role = 'admin' and (new.role <> 'admin' or new.status <> 'active') then
@@ -98,7 +99,7 @@ begin
   new.hours := round(((extract(epoch from (new.end_time - new.start_time)) / 60 - new.break_mins) / 60)::numeric, 2);
   if new.hours <= 0 then raise exception 'Finish time must be after start time (allowing for breaks).'; end if;
   if new.work_date > current_date then raise exception 'Hours cannot be logged for a future date.'; end if;
-  if not is_admin() then new.user_id := auth.uid(); end if;
+  if auth.uid() is not null and not is_admin() then new.user_id := auth.uid(); end if;
   new.updated_at := now();
   return new;
 end $$;
